@@ -18,8 +18,11 @@ class StepFunASR:
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
 
+    def _api_key(self) -> str:
+        return self.config.step_asr_api_key.strip() or self.config.step_api_key.strip()
+
     def is_available(self) -> bool:
-        return bool(self.config.step_api_key.strip()) and (
+        return bool(self._api_key()) and (
             importlib.util.find_spec("websockets") is not None
         )
 
@@ -35,7 +38,7 @@ class StepFunASR:
             return (audio.text_hint or "").strip()
 
         websockets = importlib.import_module("websockets")
-        headers = {"Authorization": "Bearer " + self.config.step_api_key}
+        headers = {"Authorization": "Bearer " + self._api_key()}
 
         async with websockets.connect(
             self.config.step_asr_ws_url,

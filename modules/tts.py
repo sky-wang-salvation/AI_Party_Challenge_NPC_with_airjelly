@@ -14,8 +14,11 @@ class StepFunTTSAdapter:
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
 
+    def _api_key(self) -> str:
+        return self.config.step_asr_api_key.strip() or self.config.step_api_key.strip()
+
     def is_available(self) -> bool:
-        return bool(self.config.step_api_key.strip()) and (
+        return bool(self._api_key()) and (
             importlib.util.find_spec("websockets") is not None
         )
 
@@ -28,7 +31,7 @@ class StepFunTTSAdapter:
             self.config.step_tts_ws_url,
             self.config.step_tts_model,
         )
-        headers = {"Authorization": "Bearer " + self.config.step_api_key}
+        headers = {"Authorization": "Bearer " + self._api_key()}
 
         async with websockets.connect(endpoint, extra_headers=headers, max_size=8 * 1024 * 1024) as websocket:
             session_event = await self._wait_for_event(

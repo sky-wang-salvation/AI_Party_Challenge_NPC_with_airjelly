@@ -46,6 +46,9 @@ class ServerConfig:
     step_api_key: str = ""
     step_base_url: str = "https://api.stepfun.com/v1"
     step_llm_model: str = "step-2-mini"
+    # Separate key for StepFun ASR/TTS WebSocket APIs.
+    # Falls back to step_api_key when empty, so existing setups are unaffected.
+    step_asr_api_key: str = ""
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.4-mini"
@@ -87,6 +90,7 @@ class ServerConfig:
             step_api_key=os.getenv("STEP_API_KEY", ""),
             step_base_url=os.getenv("STEP_BASE_URL", "https://api.stepfun.com/v1"),
             step_llm_model=os.getenv("STEP_LLM_MODEL", "step-2-mini"),
+            step_asr_api_key=os.getenv("STEP_ASR_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
