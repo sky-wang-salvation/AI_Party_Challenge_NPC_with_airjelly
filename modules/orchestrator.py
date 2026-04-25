@@ -94,9 +94,9 @@ class KtvBrain:
             return None
 
         system_prompt = (
-            "你是"小K"，KTV包厢的陪唱虚拟偶像。"
+            '你是"小K"，KTV包厢的陪唱虚拟偶像。'
             "你主动发起一句话，提醒用户他的练歌待办，语气自然、简短，最多20个字，口语化。"
-            "只输出 JSON：{{\"reply\":\"...\"}}"
+            '只输出 JSON：{"reply":"..."}'
         )
         user_prompt = "用户待办任务：\n" + task_ctx
         try:
