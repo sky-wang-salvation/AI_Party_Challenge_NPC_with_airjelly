@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import base64
+import json
+import logging
+import sys
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
+
+if __package__ in {None, ""}:
+    PACKAGE_DIR = Path(__file__).resolve().parent
+    PROJECT_ROOT = PACKAGE_DIR.parent
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from ktv_backend.modules.config import ServerConfig
+    from ktv_backend.modules.orchestrator import KtvBrain
+    from ktv_backend.modules.protocol import (
+        ValidationError,
+        build_server_message,
+        parse_client_message,
+    )
+else:
+    from .modules.config import ServerConfig
+    from .modules.orchestrator import KtvBrain
+    from .modules.protocol import ValidationError, build_server_message, parse_client_message
+
+
+LOGGER = logging.getLogger("ktv_ai_server")
+
+
+class ConnectionContext:
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self.send_lock = asyncio.Lock()
+        self.tasks = set()  # type: Set[asyncio.Task]
+
+
+class KtvWebSocketServer:
+    def __init__(self, config: ServerConfig) -> None:
+        self.config = config
+        self.brain = KtvBrain(config)
+
+    async def handler(self, websocket: Any, path: str) -> None:
+        del path
+        connection = ConnectionContext(session_id="session_" + uuid.uuid4().hex[:10])
+        LOGGER.info("client connected session=%s", connection.session_id)
+        await self._send_json(
+            websocket,
+            connection,
+            build_server_message(
+                "hello",
+                session_id=connection.session_id,
+                payload={
+                    "service": "ktv-ai-server",
+                    "protocol_version": 1,
+                    "llm_provider": self.brain.llm.provider_name,
+                    "capabilities": {
+                        "asr": self.brain.asr.is_available(),
+                        "llm": self.brain.llm.is_available(),
+                        "tts": self.brain.tts.is_available(),
+                        "music_analysis": True,
+                    },
+                },
+            ),
+        )
+
+        try:
+            async for raw_message in websocket:
+                raw_text = raw_message.decode("utf-8") if isinstance(raw_message, bytes) else raw_message
+                try:
+                    client_message = parse_client_message(raw_text, connection.session_id)
+                except ValidationError as exc:
+                    await self._send_error(
+                        websocket,
+                        connection,
+                        request_id=None,
+                        code="bad_request",
+                        message=str(exc),
+                    )
+                    continue
+
+                if client_message.message_type == "ping":
+                    await self._send_json(
+                        websocket,
+                        connection,
+                        build_server_message(
+                            "pong",
+                            request_id=client_message.request_id,
+                            session_id=client_message.session_id,
+                            payload={"ok": True},
+                        ),
+                    )
+                    continue
+
+                if client_message.message_type == "song_context":
+                    task = asyncio.create_task(
+                        self._handle_song_context(websocket, connection, client_message)
+                    )
+                    self._track_task(connection, task)
+                    continue
+
+                if client_message.message_type == "user_signal":
+                    task = asyncio.create_task(
+                        self._handle_user_signal(websocket, connection, client_message)
+                    )
+                    self._track_task(connection, task)
+                    continue
+
+                await self._send_error(
+                    websocket,
+                    connection,
+                    request_id=client_message.request_id,
+                    code="unsupported_type",
+                    message="Unsupported message type: {0}".format(client_message.message_type),
+                )
+        finally:
+            for task in list(connection.tasks):
+                task.cancel()
+            LOGGER.info("client disconnected session=%s", connection.session_id)
+
+    def _track_task(self, connection: ConnectionContext, task: asyncio.Task) -> None:
+        connection.tasks.add(task)
+        task.add_done_callback(connection.tasks.discard)
+
+    async def _handle_song_context(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+        client_message: Any,
+    ) -> None:
+        try:
+            analysis = await self.brain.prewarm_song(client_message.song)
+            await self._send_json(
+                websocket,
+                connection,
+                build_server_message(
+                    "song_ready",
+                    request_id=client_message.request_id,
+                    session_id=client_message.session_id,
+                    payload={
+                        "song": client_message.song.to_dict(),
+                        "music": analysis.to_dict(),
+                    },
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            LOGGER.exception("song_context failed")
+            await self._send_error(
+                websocket,
+                connection,
+                request_id=client_message.request_id,
+                code="song_context_failed",
+                message=str(exc),
+            )
+
+    async def _handle_user_signal(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+        client_message: Any,
+    ) -> None:
+        await self._send_json(
+            websocket,
+            connection,
+            build_server_message(
+                "ack",
+                request_id=client_message.request_id,
+                session_id=client_message.session_id,
+                payload={"accepted": True},
+            ),
+        )
+
+        try:
+            result = await self.brain.process_signal(client_message.signal)
+            await self._send_json(
+                websocket,
+                connection,
+                build_server_message(
+                    "agent_response",
+                    request_id=client_message.request_id,
+                    session_id=client_message.session_id,
+                    payload=result.to_payload(),
+                ),
+            )
+
+            chunk_count = 0
+            async for sequence, chunk in self.brain.stream_tts(result.reply_text):
+                chunk_count += 1
+                await self._send_json(
+                    websocket,
+                    connection,
+                    build_server_message(
+                        "tts_chunk",
+                        request_id=client_message.request_id,
+                        session_id=client_message.session_id,
+                        payload={
+                            "seq": sequence,
+                            "format": "audio/mpeg",
+                            "audio_b64": base64.b64encode(chunk).decode("ascii"),
+                            "is_final": False,
+                        },
+                    ),
+                )
+
+            await self._send_json(
+                websocket,
+                connection,
+                build_server_message(
+                    "tts_done",
+                    request_id=client_message.request_id,
+                    session_id=client_message.session_id,
+                    payload={
+                        "format": "audio/mpeg",
+                        "chunk_count": chunk_count,
+                        "available": chunk_count > 0,
+                    },
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            LOGGER.exception("user_signal failed")
+            await self._send_error(
+                websocket,
+                connection,
+                request_id=client_message.request_id,
+                code="processing_failed",
+                message=str(exc),
+            )
+
+    async def _send_json(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+        message: Dict[str, Any],
+    ) -> None:
+        encoded = json.dumps(message, ensure_ascii=False)
+        async with connection.send_lock:
+            await websocket.send(encoded)
+
+    async def _send_error(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+        request_id: Optional[str],
+        code: str,
+        message: str,
+    ) -> None:
+        await self._send_json(
+            websocket,
+            connection,
+            build_server_message(
+                "error",
+                request_id=request_id,
+                session_id=connection.session_id,
+                payload={"code": code, "message": message},
+            ),
+        )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="KTV multimodal AI websocket server")
+    parser.add_argument("--host", help="Host interface to bind.")
+    parser.add_argument("--port", type=int, help="Port to bind.")
+    parser.add_argument("--log-level", help="Logging level.")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose debug payloads.")
+    return parser
+
+
+async def serve(config: ServerConfig) -> None:
+    try:
+        import websockets
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing optional dependency 'websockets'. Install ktv_backend/requirements.txt first."
+        ) from exc
+
+    server = KtvWebSocketServer(config)
+    LOGGER.info("starting server at ws://%s:%s", config.host, config.port)
+    async with websockets.serve(server.handler, config.host, config.port, max_size=8 * 1024 * 1024):
+        await asyncio.Future()
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    config = ServerConfig.from_env()
+    if args.host:
+        config.host = args.host
+    if args.port:
+        config.port = args.port
+    if args.log_level:
+        config.log_level = args.log_level
+    if args.debug:
+        config.send_debug_events = True
+        config.log_level = "DEBUG"
+
+    logging.basicConfig(
+        level=getattr(logging, str(config.log_level).upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
+    asyncio.run(serve(config))
+
+
+if __name__ == "__main__":
+    main()

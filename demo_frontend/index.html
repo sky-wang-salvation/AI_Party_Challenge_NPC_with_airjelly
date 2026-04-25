@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KTV Backend Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-panel">
+        <div class="panel-card">
+          <h1>小K 联调面板</h1>
+          <p class="panel-copy">
+            这个页面用来替代 Unity 做最小验证：连 WebSocket，发点歌和互动消息，看 3D 小人能不能跟着回。
+          </p>
+        </div>
+
+        <div class="panel-card">
+          <h2>连接</h2>
+          <label>
+            WebSocket 地址
+            <input id="ws-url" type="text" value="ws://127.0.0.1:8766" />
+          </label>
+          <label>
+            Session ID
+            <input id="session-id" type="text" value="booth-demo" />
+          </label>
+          <div class="row">
+            <button id="connect-btn" class="primary">连接</button>
+            <button id="disconnect-btn">断开</button>
+            <button id="ping-btn">Ping</button>
+          </div>
+          <div class="status-line">
+            状态：
+            <span id="connection-status" class="status-pill idle">未连接</span>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <h2>歌曲预热</h2>
+          <label>
+            歌曲名
+            <input id="song-title" type="text" value="孤勇者" />
+          </label>
+          <label>
+            歌手
+            <input id="song-artist" type="text" value="陈奕迅" />
+          </label>
+          <label>
+            歌曲 URL / 本地路径
+            <input id="song-url" type="text" placeholder="可留空" />
+          </label>
+          <button id="send-song-btn" class="primary">发送 song_context</button>
+        </div>
+
+        <div class="panel-card">
+          <h2>互动输入</h2>
+          <label>
+            用户文本
+            <textarea id="user-text" rows="3" placeholder="先用文本联调最稳，比如：小K我们一起唱副歌"></textarea>
+          </label>
+          <label>
+            姿态
+            <select id="pose-label">
+              <option value="">none</option>
+              <option value="arms_up">arms_up</option>
+              <option value="jumping">jumping</option>
+            </select>
+          </label>
+          <label>
+            触摸
+            <select id="touch-event">
+              <option value="">none</option>
+              <option value="give_me_5">give_me_5</option>
+              <option value="heart">heart</option>
+            </select>
+          </label>
+          <label>
+            可选音频文件
+            <input id="audio-file" type="file" accept=".wav,audio/wav" />
+          </label>
+          <div class="row">
+            <button id="send-signal-btn" class="primary">发送 user_signal</button>
+            <button id="preset-chorus-btn">副歌测试</button>
+            <button id="preset-heart-btn">爱心测试</button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <h2>后端输出</h2>
+          <div class="meta-grid">
+            <div>
+              <span class="meta-label">台词</span>
+              <div id="reply-text" class="meta-value">等待消息</div>
+            </div>
+            <div>
+              <span class="meta-label">动作</span>
+              <div id="reply-action" class="meta-value">idle</div>
+            </div>
+            <div>
+              <span class="meta-label">表情</span>
+              <div id="reply-expression" class="meta-value">calm</div>
+            </div>
+            <div>
+              <span class="meta-label">转写</span>
+              <div id="reply-transcript" class="meta-value">-</div>
+            </div>
+          </div>
+          <div class="timing-box">
+            <span class="meta-label">耗时</span>
+            <pre id="timing-json">-</pre>
+          </div>
+          <audio id="audio-player" controls></audio>
+        </div>
+      </aside>
+
+      <main class="stage-panel">
+        <div class="stage-card">
+          <div class="stage-header">
+            <div>
+              <h2>Three.js 小K</h2>
+              <p>动作用最小骨架模拟，够我们先验证接口闭环。</p>
+            </div>
+            <div class="chips">
+              <span id="music-chip" class="chip">music: waiting</span>
+              <span id="source-chip" class="chip">source: -</span>
+            </div>
+          </div>
+          <canvas id="stage-canvas"></canvas>
+        </div>
+
+        <div class="stage-card log-card">
+          <div class="stage-header">
+            <div>
+              <h2>消息日志</h2>
+              <p>方便观察 `hello / ack / song_ready / agent_response / tts_*`。</p>
+            </div>
+            <button id="clear-log-btn">清空日志</button>
+          </div>
+          <pre id="log-output"></pre>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

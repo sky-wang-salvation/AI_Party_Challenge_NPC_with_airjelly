@@ -1,0 +1,268 @@
+:root {
+  --bg: #f3efe7;
+  --panel: rgba(255, 251, 245, 0.9);
+  --line: rgba(49, 43, 33, 0.12);
+  --ink: #241d16;
+  --muted: #6b6257;
+  --accent: #d9602c;
+  --accent-2: #1d7c76;
+  --shadow: 0 20px 40px rgba(36, 29, 22, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(217, 96, 44, 0.15), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(29, 124, 118, 0.13), transparent 25%),
+    linear-gradient(180deg, #f8f4ed, var(--bg));
+  font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 18px;
+  min-height: 100vh;
+  padding: 18px;
+}
+
+.control-panel,
+.stage-panel {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.panel-card,
+.stage-card {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.panel-card {
+  padding: 18px;
+}
+
+.stage-card {
+  padding: 16px;
+}
+
+.stage-card:first-child {
+  min-height: 62vh;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+.panel-copy,
+.stage-header p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(49, 43, 33, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--ink);
+}
+
+textarea {
+  resize: vertical;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  cursor: pointer;
+  padding: 10px 14px;
+  border: 1px solid rgba(49, 43, 33, 0.14);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(36, 29, 22, 0.08);
+}
+
+button.primary {
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #e1822f);
+  border-color: transparent;
+}
+
+.status-line {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(36, 29, 22, 0.08);
+  color: var(--ink);
+}
+
+.status-pill.connected {
+  background: rgba(29, 124, 118, 0.15);
+  color: #0f605b;
+}
+
+.status-pill.error {
+  background: rgba(206, 57, 57, 0.12);
+  color: #a12828;
+}
+
+.status-pill.idle {
+  background: rgba(36, 29, 22, 0.08);
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.meta-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.meta-value {
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.65);
+  line-height: 1.45;
+}
+
+.timing-box {
+  margin-top: 12px;
+}
+
+.timing-box pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.stage-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(36, 29, 22, 0.08);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+#stage-canvas {
+  width: 100%;
+  height: 54vh;
+  display: block;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 213, 173, 0.4), transparent 36%),
+    linear-gradient(180deg, #1b2434, #34241f 52%, #9c6835 100%);
+}
+
+.log-card {
+  min-height: 28vh;
+}
+
+#log-output {
+  margin: 0;
+  min-height: 220px;
+  max-height: 32vh;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 18px;
+  background: #17161a;
+  color: #efe9df;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#audio-player {
+  width: 100%;
+  margin-top: 12px;
+}
+
+@media (max-width: 1080px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  #stage-canvas {
+    height: 42vh;
+  }
+}
