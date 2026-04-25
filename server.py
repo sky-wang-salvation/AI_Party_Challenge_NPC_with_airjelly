@@ -43,8 +43,7 @@ class KtvWebSocketServer:
         self.config = config
         self.brain = KtvBrain(config)
 
-    async def handler(self, websocket: Any, path: str) -> None:
-        del path
+    async def handler(self, websocket: Any) -> None:
         connection = ConnectionContext(session_id="session_" + uuid.uuid4().hex[:10])
         LOGGER.info("client connected session=%s", connection.session_id)
 
