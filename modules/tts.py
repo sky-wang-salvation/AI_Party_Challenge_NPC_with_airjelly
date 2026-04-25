@@ -33,7 +33,7 @@ class StepFunTTSAdapter:
         )
         headers = {"Authorization": "Bearer " + self._api_key()}
 
-        async with websockets.connect(endpoint, extra_headers=headers, max_size=8 * 1024 * 1024) as websocket:
+        async with websockets.connect(endpoint, additional_headers=headers, max_size=8 * 1024 * 1024) as websocket:
             session_event = await self._wait_for_event(
                 websocket,
                 allowed_types={"tts.connection.done"},

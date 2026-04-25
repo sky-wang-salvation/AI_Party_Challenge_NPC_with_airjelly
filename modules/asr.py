@@ -42,7 +42,7 @@ class StepFunASR:
 
         async with websockets.connect(
             self.config.step_asr_ws_url,
-            extra_headers=headers,
+            additional_headers=headers,
             max_size=8 * 1024 * 1024,
         ) as websocket:
             await websocket.send(
