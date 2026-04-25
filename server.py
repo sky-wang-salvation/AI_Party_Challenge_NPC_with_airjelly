@@ -47,6 +47,10 @@ class KtvWebSocketServer:
         del path
         connection = ConnectionContext(session_id="session_" + uuid.uuid4().hex[:10])
         LOGGER.info("client connected session=%s", connection.session_id)
+
+        airjelly_available = (
+            self.brain.airjelly is not None and self.brain.airjelly.is_available()
+        )
         await self._send_json(
             websocket,
             connection,
@@ -62,10 +66,18 @@ class KtvWebSocketServer:
                         "llm": self.brain.llm.is_available(),
                         "tts": self.brain.tts.is_available(),
                         "music_analysis": True,
+                        "airjelly": airjelly_available,
+                        "proactive_nudge": airjelly_available,
                     },
                 },
             ),
         )
+
+        # Start proactive nudge loop
+        proactive_task = asyncio.create_task(
+            self._proactive_loop(websocket, connection)
+        )
+        self._track_task(connection, proactive_task)
 
         try:
             async for raw_message in websocket:
@@ -228,6 +240,47 @@ class KtvWebSocketServer:
                 code="processing_failed",
                 message=str(exc),
             )
+
+    async def _proactive_loop(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+    ) -> None:
+        """
+        Runs in the background for each connection.
+        Periodically checks AirJelly context and pushes a proactive_nudge to Unity
+        when there is something worth saying (e.g. a pending practice task).
+        """
+        interval = self.config.airjelly_proactive_interval_s
+        # Wait before the first check so the user has time to settle in
+        await asyncio.sleep(min(interval, 10.0))
+        while True:
+            try:
+                session = self.brain.sessions.get(connection.session_id)
+                msg = await self.brain.generate_proactive_message(session)
+                if msg:
+                    await self._send_json(
+                        websocket,
+                        connection,
+                        build_server_message(
+                            "proactive_nudge",
+                            session_id=connection.session_id,
+                            payload={
+                                "text": msg,
+                                "action": "wave",
+                                "expression": "playful",
+                                "trigger": "airjelly_task",
+                            },
+                        ),
+                    )
+                    LOGGER.info(
+                        "proactive_nudge sent session=%s text=%r",
+                        connection.session_id,
+                        msg,
+                    )
+            except Exception as exc:
+                LOGGER.debug("proactive_loop error: %s", exc)
+            await asyncio.sleep(interval)
 
     async def _send_json(
         self,

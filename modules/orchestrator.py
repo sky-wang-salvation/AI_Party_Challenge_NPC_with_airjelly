@@ -3,15 +3,16 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+from .airjelly_client import AirJellyClient
 from .asr import StepFunASR
 from .config import ServerConfig
 from .llm import KtvLlmClient, LlmDirective
 from .music import MusicAnalysis, MusicAnalyzer
 from .persona import build_prompts
 from .protocol import ALLOWED_ACTIONS, ALLOWED_EXPRESSIONS, SongPayload, UserSignal
-from .state import DialogueTurn, SessionRegistry
+from .state import DialogueTurn, SessionRegistry, SessionState
 from .tts import StepFunTTSAdapter
 from .utils import compact_text
 
@@ -50,15 +51,72 @@ class KtvBrain:
         self.llm = KtvLlmClient(config)
         self.tts = StepFunTTSAdapter(config)
         self.music = MusicAnalyzer(config)
+        self.airjelly = AirJellyClient(timeout_s=config.airjelly_timeout_s) if config.airjelly_enabled else None
 
     async def prewarm_song(self, song: SongPayload) -> MusicAnalysis:
         if not song or not song.has_context():
             return self.music.estimate(song)
         return await self.music.prewarm(song)
 
+    async def prefetch_airjelly(self, session: SessionState, artist_hint: str = "") -> None:
+        """Fetch AirJelly context and store it on the session. Called once per session."""
+        if not self.airjelly or not self.airjelly.is_available():
+            return
+        try:
+            music_ctx, task_ctx = await asyncio.gather(
+                self.airjelly.build_music_context(artist_hint),
+                self.airjelly.build_task_context(),
+                return_exceptions=True,
+            )
+            session.update_airjelly(
+                music_context=music_ctx if isinstance(music_ctx, str) else "",
+                task_context=task_ctx if isinstance(task_ctx, str) else "",
+            )
+        except Exception:
+            pass
+
+    async def generate_proactive_message(self, session: SessionState) -> Optional[str]:
+        """
+        Generate a proactive nudge based on AirJelly context.
+        Returns None if there's nothing worth proactively saying.
+        """
+        if not self.airjelly or not self.airjelly.is_available():
+            return None
+        if not self.llm.is_available():
+            return None
+        try:
+            task_ctx = await asyncio.wait_for(
+                self.airjelly.build_task_context(), timeout=1.0
+            )
+        except Exception:
+            task_ctx = ""
+        if not task_ctx:
+            return None
+
+        system_prompt = (
+            "你是"小K"，KTV包厢的陪唱虚拟偶像。"
+            "你主动发起一句话，提醒用户他的练歌待办，语气自然、简短，最多20个字，口语化。"
+            "只输出 JSON：{{\"reply\":\"...\"}}"
+        )
+        user_prompt = "用户待办任务：\n" + task_ctx
+        try:
+            directive = await asyncio.wait_for(
+                self.llm.generate_directive(system_prompt, user_prompt),
+                timeout=self.config.llm_timeout_s,
+            )
+            return directive.reply_text or None
+        except Exception:
+            return None
+
     async def process_signal(self, signal: UserSignal) -> BrainResult:
         stage_start = time.perf_counter()
-        session = self.sessions.get(signal.session_id)
+        session = self.sessions.get(signal.session_id, user_id=signal.user_id)
+
+        # Kick off AirJelly prefetch if this is the first turn of the session
+        if self.airjelly and not session.airjelly_prefetched:
+            asyncio.create_task(
+                self.prefetch_airjelly(session, artist_hint=signal.song.artist)
+            )
 
         music_stage = time.perf_counter()
         music = await self._resolve_music(signal.song)
@@ -70,6 +128,12 @@ class KtvBrain:
             transcript = compact_text(await self.asr.transcribe(signal.audio), 80)
         asr_ms = int((time.perf_counter() - transcript_stage) * 1000)
 
+        # Async task creation intent detection (fire-and-forget)
+        if transcript and self.airjelly:
+            asyncio.create_task(
+                self.airjelly.maybe_create_ktv_task(transcript, signal.song.title)
+            )
+
         fallback = self._build_rule_response(signal, transcript, music)
         response = fallback
         source = "rules"
@@ -78,7 +142,14 @@ class KtvBrain:
         if self.llm.is_available():
             llm_stage = time.perf_counter()
             try:
-                system_prompt, user_prompt = build_prompts(signal, music.short_text(), transcript, session)
+                system_prompt, user_prompt = build_prompts(
+                    signal,
+                    music.short_text(),
+                    transcript,
+                    session,
+                    airjelly_music_context=session.airjelly_music_context,
+                    airjelly_task_context=session.airjelly_task_context,
+                )
                 remaining_budget = max(
                     0.2,
                     self.config.overall_timeout_s - (time.perf_counter() - stage_start) - 0.2,
@@ -126,8 +197,10 @@ class KtvBrain:
                     "asr": self.asr.is_available(),
                     "llm": self.llm.is_available(),
                     "tts": self.tts.is_available(),
+                    "airjelly": self.airjelly.is_available() if self.airjelly else False,
                 },
                 "llm_provider": self.llm.provider_name,
+                "airjelly_prefetched": session.airjelly_prefetched,
             }
         return BrainResult(
             reply_text=response.reply_text,

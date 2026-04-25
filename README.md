@@ -1,6 +1,32 @@
-# KTV AI Backend
+# KTV AI Backend · with AirJelly
 
 这套后端现在已经单独收进 `ktv_backend/`，不再和根目录里的 `memory_system` 混在一起。
+
+## AirJelly 集成（赛道一）
+
+本版本接入 [AirJelly Desktop](https://airjelly.ai) 的本地 API，赋予小K：
+
+- **长期记忆**：从 AirJelly 搜索用户的音乐偏好历史，注入 LLM Prompt，让小K认识"老朋友"
+- **App 使用感知**：检测用户今天用了哪些音乐 App，推断心情和歌单方向
+- **练歌待办**：读取用户在 AirJelly 里的练歌任务，让小K主动提醒
+- **任务创建**：当用户说"帮我记住要练这首"，自动在 AirJelly 里创建任务
+- **主动推送**：服务器后台定时检查 AirJelly 上下文，主动向 Unity 推送 `proactive_nudge` 消息
+
+AirJelly 不运行时所有功能优雅降级，KTV 服务正常工作。
+
+### AirJelly 环境变量
+
+```powershell
+$env:AIRJELLY_ENABLED="true"           # 默认开启
+$env:AIRJELLY_TIMEOUT_S="1.5"          # 单次查询超时
+$env:AIRJELLY_MEMORY_LIMIT="4"         # 最多注入几条记忆
+$env:AIRJELLY_PROACTIVE_INTERVAL_S="30" # 主动推送检查间隔（秒）
+```
+
+> 需要先安装并运行 [AirJelly Desktop](https://airjelly.ai)，CLI 验证：
+> ```bash
+> npm i -g @airjelly/cli && airjelly status
+> ```
 
 ## 目录
 

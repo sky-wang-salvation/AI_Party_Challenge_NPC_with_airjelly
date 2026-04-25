@@ -67,6 +67,11 @@ class ServerConfig:
     music_download_timeout_s: float = 4.0
     music_analysis_duration_s: float = 45.0
     song_cache_dir: Path = field(default_factory=lambda: PACKAGE_ROOT / ".ktv_cache" / "songs")
+    # AirJelly integration
+    airjelly_enabled: bool = True
+    airjelly_timeout_s: float = 1.5
+    airjelly_memory_limit: int = 4
+    airjelly_proactive_interval_s: float = 30.0
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -109,4 +114,8 @@ class ServerConfig:
             music_download_timeout_s=_env_float("KTV_MUSIC_DOWNLOAD_TIMEOUT_S", 4.0),
             music_analysis_duration_s=_env_float("KTV_MUSIC_ANALYSIS_DURATION_S", 45.0),
             song_cache_dir=Path(cache_dir) if cache_dir else PACKAGE_ROOT / ".ktv_cache" / "songs",
+            airjelly_enabled=_env_bool("AIRJELLY_ENABLED", True),
+            airjelly_timeout_s=_env_float("AIRJELLY_TIMEOUT_S", 1.5),
+            airjelly_memory_limit=_env_int("AIRJELLY_MEMORY_LIMIT", 4),
+            airjelly_proactive_interval_s=_env_float("AIRJELLY_PROACTIVE_INTERVAL_S", 30.0),
         )

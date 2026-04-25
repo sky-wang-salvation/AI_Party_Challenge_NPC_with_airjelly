@@ -6,20 +6,23 @@ from .protocol import ALLOWED_ACTIONS, ALLOWED_EXPRESSIONS, UserSignal
 from .state import SessionState
 
 
-SYSTEM_PROMPT = """你是“小K”，一个站在KTV触摸屏前的陪唱虚拟偶像。
+SYSTEM_PROMPT = """你是"小K"，一个站在KTV触摸屏前的陪唱虚拟偶像。
 你要像现场气氛担当一样回应用户：快、短、自然、会接梗，但不要阴阳怪气。
 
-你必须同时理解四类输入：
+你必须同时理解五类输入：
 1. 用户说了什么
 2. 用户当前姿态
 3. 触摸屏互动事件
 4. 当前歌曲的节奏和情绪
+5. 用户的长期记忆与待办任务（来自 AirJelly）
 
 输出时遵守这些规则：
 - 只能输出 JSON，不要解释，不要 markdown
 - JSON 结构固定为 {{"reply":"...","action":"...","expression":"..."}}
 - reply 用口语化中文，1 到 2 句，总长度控制在 8 到 36 个字
 - 如果正在唱歌，优先陪唱、打气、接梗，不要长篇问答
+- 如果有用户的练歌待办任务，可以自然地提及，增加陪伴感
+- 如果有用户的音乐记忆，可以结合来个性化回应（如提到他常唱的歌手）
 - touch_event 是 give_me_5 时优先 high_five
 - touch_event 是 heart 时优先 heart_pose
 - 高能量歌曲优先 dance_fast 或 cheer
@@ -32,7 +35,14 @@ SYSTEM_PROMPT = """你是“小K”，一个站在KTV触摸屏前的陪唱虚拟
 )
 
 
-def build_prompts(signal: UserSignal, music_summary: str, transcript: str, session: SessionState) -> Tuple[str, str]:
+def build_prompts(
+    signal: UserSignal,
+    music_summary: str,
+    transcript: str,
+    session: SessionState,
+    airjelly_music_context: str = "",
+    airjelly_task_context: str = "",
+) -> Tuple[str, str]:
     history_lines = []
     for turn in session.recent_turns(3):
         history_lines.append(
@@ -44,26 +54,24 @@ def build_prompts(signal: UserSignal, music_summary: str, transcript: str, sessi
             )
         )
     history_text = "\n".join(history_lines) if history_lines else "无历史"
-    prompt = """
-请根据现场上下文输出一条最合适的回应。
 
-用户语音转写：
-{transcript}
+    airjelly_section = ""
+    if airjelly_music_context or airjelly_task_context:
+        parts = []
+        if airjelly_music_context:
+            parts.append(airjelly_music_context)
+        if airjelly_task_context:
+            parts.append(airjelly_task_context)
+        airjelly_section = "\n\n用户长期记忆（AirJelly）：\n" + "\n".join(parts)
 
-姿态标签：
-{pose}
-
-触摸事件：
-{touch}
-
-当前歌曲：
-标题={title}
-歌手={artist}
-音乐分析={music_summary}
-
-最近互动历史：
-{history}
-""".strip().format(
+    prompt = (
+        "请根据现场上下文输出一条最合适的回应。\n\n"
+        "用户语音转写：\n{transcript}\n\n"
+        "姿态标签：\n{pose}\n\n"
+        "触摸事件：\n{touch}\n\n"
+        "当前歌曲：\n标题={title}\n歌手={artist}\n音乐分析={music_summary}\n\n"
+        "最近互动历史：\n{history}{airjelly_section}"
+    ).format(
         transcript=transcript or "（本轮没有清晰语音）",
         pose=signal.pose_label or "none",
         touch=signal.touch_event or "none",
@@ -71,5 +79,6 @@ def build_prompts(signal: UserSignal, music_summary: str, transcript: str, sessi
         artist=signal.song.artist or "未知",
         music_summary=music_summary,
         history=history_text,
+        airjelly_section=airjelly_section,
     )
     return SYSTEM_PROMPT, prompt

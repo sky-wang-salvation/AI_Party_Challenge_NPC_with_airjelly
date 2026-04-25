@@ -133,6 +133,7 @@ class UserSignal:
     touch_event: str = ""
     song: SongPayload = field(default_factory=SongPayload)
     user_text: str = ""
+    user_id: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=utc_now)
 
@@ -154,6 +155,7 @@ class UserSignal:
             touch_event=str(payload.get("touch_event") or payload.get("touch") or ""),
             song=SongPayload.from_value(payload.get("song")),
             user_text=str(payload.get("user_text") or payload.get("text") or ""),
+            user_id=str(payload.get("user_id") or ""),
             metadata=metadata,
             timestamp=str(payload.get("timestamp") or utc_now()),
         )
