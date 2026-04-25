@@ -18,6 +18,7 @@ if __package__ in {None, ""}:
     from ktv_backend.modules.config import ServerConfig
     from ktv_backend.modules.orchestrator import KtvBrain
     from ktv_backend.modules.protocol import (
+        SongPayload,
         ValidationError,
         build_server_message,
         parse_client_message,
@@ -25,7 +26,7 @@ if __package__ in {None, ""}:
 else:
     from .modules.config import ServerConfig
     from .modules.orchestrator import KtvBrain
-    from .modules.protocol import ValidationError, build_server_message, parse_client_message
+    from .modules.protocol import SongPayload, ValidationError, build_server_message, parse_client_message
 
 
 LOGGER = logging.getLogger("ktv_ai_server")
@@ -67,6 +68,9 @@ class KtvWebSocketServer:
                         "music_analysis": True,
                         "airjelly": airjelly_available,
                         "proactive_nudge": airjelly_available,
+                        "scene_directive": True,
+                        "instant_effect": True,
+                        "emotion_portrait": True,
                     },
                 },
             ),
@@ -120,6 +124,13 @@ class KtvWebSocketServer:
                     self._track_task(connection, task)
                     continue
 
+                if client_message.message_type == "song_end":
+                    task = asyncio.create_task(
+                        self._handle_song_end(websocket, connection, client_message)
+                    )
+                    self._track_task(connection, task)
+                    continue
+
                 await self._send_error(
                     websocket,
                     connection,
@@ -128,8 +139,11 @@ class KtvWebSocketServer:
                     message="Unsupported message type: {0}".format(client_message.message_type),
                 )
         finally:
-            for task in list(connection.tasks):
+            tasks_to_cancel = list(connection.tasks)
+            for task in tasks_to_cancel:
                 task.cancel()
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
             LOGGER.info("client disconnected session=%s", connection.session_id)
 
     def _track_task(self, connection: ConnectionContext, task: asyncio.Task) -> None:
@@ -144,6 +158,12 @@ class KtvWebSocketServer:
     ) -> None:
         try:
             analysis = await self.brain.prewarm_song(client_message.song)
+            # Build opening scene directive for this song
+            open_scene = self.brain.build_song_open_scene(client_message.song, analysis)
+            # Update session theme to the song's opening theme
+            session = self.brain.sessions.get(connection.session_id)
+            session.last_theme = open_scene.theme
+            session.update_song(client_message.song.title, client_message.song.artist)
             await self._send_json(
                 websocket,
                 connection,
@@ -154,6 +174,7 @@ class KtvWebSocketServer:
                     payload={
                         "song": client_message.song.to_dict(),
                         "music": analysis.to_dict(),
+                        "scene": open_scene.to_dict(),
                     },
                 ),
             )
@@ -173,6 +194,15 @@ class KtvWebSocketServer:
         connection: ConnectionContext,
         client_message: Any,
     ) -> None:
+        # Compute instant effect immediately (rule-based, no LLM wait → <100 ms)
+        session = self.brain.sessions.get(connection.session_id)
+        instant_effect = self.brain.scene_director.build_instant_effect_for_signal(
+            client_message.signal, session.last_theme
+        )
+        ack_payload: Dict[str, Any] = {"accepted": True}
+        if instant_effect is not None:
+            ack_payload["instant_effect"] = instant_effect.to_dict()
+
         await self._send_json(
             websocket,
             connection,
@@ -180,7 +210,7 @@ class KtvWebSocketServer:
                 "ack",
                 request_id=client_message.request_id,
                 session_id=client_message.session_id,
-                payload={"accepted": True},
+                payload=ack_payload,
             ),
         )
 
@@ -239,6 +269,41 @@ class KtvWebSocketServer:
                 code="processing_failed",
                 message=str(exc),
             )
+
+    async def _handle_song_end(
+        self,
+        websocket: Any,
+        connection: ConnectionContext,
+        client_message: Any,
+    ) -> None:
+        """Handle song_end from Unity: build and send the emotion_portrait."""
+        session = self.brain.sessions.get(connection.session_id)
+        # Retrieve last cached music analysis, falling back to heuristic estimate
+        dummy_song = SongPayload(
+            title=session._last_song_title,
+            artist=session._last_song_artist,
+        )
+        cached_music = (
+            self.brain.music.get_cached(dummy_song)
+            or self.brain.music.estimate(dummy_song)
+        )
+        portrait = self.brain.build_emotion_portrait(session, cached_music)
+        await self._send_json(
+            websocket,
+            connection,
+            build_server_message(
+                "emotion_portrait",
+                request_id=client_message.request_id,
+                session_id=client_message.session_id,
+                payload=portrait.to_dict(),
+            ),
+        )
+        LOGGER.info(
+            "emotion_portrait sent session=%s theme=%s events=%d",
+            connection.session_id,
+            portrait.theme,
+            len(portrait.key_events),
+        )
 
     async def _proactive_loop(
         self,

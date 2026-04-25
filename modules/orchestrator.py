@@ -8,10 +8,12 @@ from typing import Any, Dict, Optional
 from .airjelly_client import AirJellyClient
 from .asr import StepFunASR
 from .config import ServerConfig
+from .directives import SceneDirective
 from .llm import KtvLlmClient, LlmDirective
 from .music import MusicAnalysis, MusicAnalyzer
 from .persona import build_prompts
 from .protocol import ALLOWED_ACTIONS, ALLOWED_EXPRESSIONS, SongPayload, UserSignal
+from .scene_builder import SceneDirector
 from .state import DialogueTurn, SessionRegistry, SessionState
 from .tts import StepFunTTSAdapter
 from .utils import compact_text
@@ -26,6 +28,7 @@ class BrainResult:
     music: MusicAnalysis
     source: str
     timings_ms: Dict[str, int]
+    scene: Optional[SceneDirective] = None
     debug: Dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> Dict[str, Any]:
@@ -38,6 +41,8 @@ class BrainResult:
             "source": self.source,
             "timings_ms": self.timings_ms,
         }
+        if self.scene is not None:
+            payload["scene"] = self.scene.to_dict()
         if self.debug:
             payload["debug"] = self.debug
         return payload
@@ -52,6 +57,7 @@ class KtvBrain:
         self.tts = StepFunTTSAdapter(config)
         self.music = MusicAnalyzer(config)
         self.airjelly = AirJellyClient(timeout_s=config.airjelly_timeout_s) if config.airjelly_enabled else None
+        self.scene_director = SceneDirector()
 
     async def prewarm_song(self, song: SongPayload) -> MusicAnalysis:
         if not song or not song.has_context():
@@ -166,9 +172,19 @@ class KtvBrain:
         else:
             llm_ms = 0
 
+        # Build scene directive (layer 1–4 visual state for Unity)
+        scene = self.scene_director.build_scene(
+            music=music,
+            signal=signal,
+            action=response.action,
+            expression=response.expression,
+            reply_text=response.reply_text,
+        )
+
         session.last_pose_label = signal.pose_label
         session.last_touch_event = signal.touch_event
-        session.current_song_key = signal.song.song_key()
+        session.last_theme = scene.theme
+        session.update_song(signal.song.title, signal.song.artist)
         session.add_turn(
             DialogueTurn(
                 user_text=transcript or self._describe_nonverbal(signal),
@@ -179,6 +195,11 @@ class KtvBrain:
             ),
             max_history_turns=self.config.max_history_turns,
         )
+
+        # Record energy sample and key events for emotion portrait
+        energy_value = {"high": 0.85, "medium": 0.55, "low": 0.30}.get(music.energy, 0.5)
+        session.record_energy(energy_value)
+        self._log_session_events(session, signal, scene.theme)
 
         total_ms = int((time.perf_counter() - stage_start) * 1000)
         timings_ms = {
@@ -201,6 +222,7 @@ class KtvBrain:
                 },
                 "llm_provider": self.llm.provider_name,
                 "airjelly_prefetched": session.airjelly_prefetched,
+                "scene_theme": scene.theme,
             }
         return BrainResult(
             reply_text=response.reply_text,
@@ -210,6 +232,7 @@ class KtvBrain:
             music=music,
             source=source,
             timings_ms=timings_ms,
+            scene=scene,
             debug=debug,
         )
 
@@ -305,6 +328,49 @@ class KtvBrain:
             action=music.dance_action,
             expression=music.expression,
         )
+
+    def build_song_open_scene(self, song: SongPayload, music: MusicAnalysis) -> "SceneDirective":
+        """Return the opening scene directive for a newly prewarmed song."""
+        return self.scene_director.build_song_open_scene(
+            music=music, song_title=song.title
+        )
+
+    def build_emotion_portrait(self, session: SessionState, music: MusicAnalysis):
+        """Build the end-of-song EmotionPortrait for the given session."""
+        return self.scene_director.build_emotion_portrait(session, music)
+
+    def _log_session_events(
+        self,
+        session: SessionState,
+        signal: UserSignal,
+        theme: str,
+    ) -> None:
+        touch = (signal.touch_event or "").lower()
+        pose  = (signal.pose_label  or "").lower()
+        text  = (signal.user_text   or "").lower()
+
+        touch_labels = {
+            "give_me_5": ("give_me_5", "击掌"),
+            "heart":     ("heart",     "比心"),
+            "fist_bump": ("fist_bump", "碰拳"),
+        }
+        pose_labels = {
+            "arms_up": ("arms_up", "举手"),
+            "jumping": ("jumping", "跳跃"),
+        }
+        chorus_kw = ("副歌", "高潮", "chorus", "燥起来", "爆发")
+
+        if touch in touch_labels:
+            et, label = touch_labels[touch]
+            session.log_key_event(et, label)
+        if pose in pose_labels:
+            et, label = pose_labels[pose]
+            session.log_key_event(et, label)
+        if any(kw in text for kw in chorus_kw):
+            session.log_key_event("chorus_start", "副歌爆发")
+        if theme == "burst" and not any(kw in text for kw in chorus_kw):
+            # High-energy turn that became burst theme
+            session.log_key_event("energy_peak", "高能时刻")
 
     def _describe_nonverbal(self, signal: UserSignal) -> str:
         parts = []

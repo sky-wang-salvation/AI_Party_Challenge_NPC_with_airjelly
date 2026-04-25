@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from typing import Any, Callable, Dict
 
 
 def utc_now() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None).isoformat() + "Z"
 
 
 async def run_blocking(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:

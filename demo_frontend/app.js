@@ -1,5 +1,5 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js";
-import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/controls/OrbitControls.js";
+import * as THREE from "./vendor/three.module.js";
+import { OrbitControls } from "./vendor/addons/controls/OrbitControls.js";
 
 const state = {
   socket: null,

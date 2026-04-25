@@ -186,7 +186,8 @@ class MusicAnalyzer:
                 return temp_file.name, temp_file.name
 
         if parsed.scheme == "file":
-            file_path = Path(parsed.path.lstrip("/"))
+            from urllib.request import url2pathname
+            file_path = Path(url2pathname(parsed.path))
             return str(file_path), None
 
         local_path = Path(raw)
@@ -207,7 +208,7 @@ class MusicAnalyzer:
         if energy == "high" and normalized_centroid >= 0.45:
             mood = "uplifting"
         elif energy == "high":
-            mood = "intense"
+            mood = "uplifting"  # map intense → uplifting so downstream mood handlers always match
         elif energy == "low" and tempo <= 88:
             mood = "tender"
         elif normalized_centroid <= 0.28:
